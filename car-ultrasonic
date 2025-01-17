@@ -1,0 +1,127 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <Servo.h>
+
+// Initialize LCD and Servo
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+Servo gateServo;
+
+// Pin Configurations
+const int trigPins[] = {2, 4, 6};    // Ultrasonic sensor trigger pins.
+const int echoPins[] = {3, 5, 7};    // Ultrasonic sensor echo pins.
+const int ledPins[] = {A0, A1, A2};  // LED pins for slots.
+const int switchPins[] = {10, 11, 12}; // Switch pins for reserved slots.
+const int photoresistorPin = A3;     // Pin for photoresistor.
+const int pirPin = 8;                // Pin for PIR sensor.
+const int lightBulbPin = 13;         // Pin for light bulb.
+const int objectRange = 150;         // Threshold distance for detecting an object (in cm).
+
+long readUltrasonicDistance(int triggerPin, int echoPin) {
+  digitalWrite(triggerPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(triggerPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(triggerPin, LOW);
+  return pulseIn(echoPin, HIGH);
+}
+
+int getDistance(int trigPin, int echoPin) {
+  long duration = readUltrasonicDistance(trigPin, echoPin);
+  return (duration * 0.0343) / 2; // Convert duration to distance in cm.
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  // Initialize LCD
+  lcd.init();
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print("Smart Parking");
+
+  // Initialize Servo
+  gateServo.attach(9); // Attach the servo to pin 9.
+  gateServo.write(0);  // Set gate to closed position initially.
+
+  // Initialize Ultrasonic Sensors, LEDs, and Switches
+  for (int i = 0; i < 3; i++) {
+    pinMode(trigPins[i], OUTPUT);
+    pinMode(echoPins[i], INPUT);
+    pinMode(ledPins[i], OUTPUT);
+    pinMode(switchPins[i], INPUT_PULLUP);
+  }
+
+  // Initialize Photoresistor, PIR Sensor, and Light Bulb
+  pinMode(photoresistorPin, INPUT);
+  pinMode(pirPin, INPUT);
+  pinMode(lightBulbPin, OUTPUT); // Configure light bulb pin as output.
+  digitalWrite(lightBulbPin, LOW); // Ensure light bulb is off initially.
+  
+  delay(2000); // Allow time for setup.
+}
+
+void loop() {
+  int reservedCount = 0;
+  int parkedCount = 0;
+  int availableCount = 0;
+
+  lcd.clear();  // Clear the LCD to prepare for new text.
+  lcd.setCursor(0, 0);  // Set the cursor to the first line.
+  lcd.print("Parking Slots:");
+
+  // Process Parking Slots
+  for (int i = 0; i < 3; i++) {
+    int distance = getDistance(trigPins[i], echoPins[i]);  // Get the distance for each slot.
+    bool isReserved = digitalRead(switchPins[i]) == LOW; // Check if the slot is reserved.
+
+    lcd.setCursor(0, i + 1);  // Move to the next line for each slot (i+1 because the first line is used for "Parking Slots").
+
+    // Check if the slot is reserved
+    if (isReserved) {
+      reservedCount++;
+      digitalWrite(ledPins[i], LOW); // Turn off LED for reserved slot.
+      lcd.print("Slot ");
+      lcd.print(i + 1);
+      lcd.print(": Reserved");
+    } 
+    // Check if the distance is within the object range (150 cm) and slot is not reserved
+    else if (distance > 0 && distance <= objectRange) {
+      parkedCount++;
+      digitalWrite(ledPins[i], LOW); // Turn off LED for occupied slot.
+      lcd.print("Slot ");
+      lcd.print(i + 1);
+      lcd.print(": Full");
+    } 
+    // If no object within range and slot is available
+    else {
+      availableCount++;
+      digitalWrite(ledPins[i], HIGH); // Turn on LED for available slot.
+      lcd.print("Slot ");
+      lcd.print(i + 1);
+      lcd.print(": Empty");
+    }
+
+    delay(1000); // Slow down the loop updates (1 second delay)
+  }
+
+  // Gate Control Logic (Optional, based on motion and light level)
+  int lightLevel = analogRead(photoresistorPin); // Read photoresistor value.
+  bool motionDetected = digitalRead(pirPin);     // Read PIR sensor value.
+  if (lightLevel < 500 && motionDetected) {  // Example condition: low light and motion detected.
+    gateServo.write(90); // Open the gate.
+    Serial.println("Gate Opened");
+  } else {
+    gateServo.write(0); // Close the gate.
+    Serial.println("Gate Closed");
+  }
+
+  // Display summary on the serial monitor (Optional)
+  Serial.println("---------------------------");
+  Serial.print("Total Reserved Slots: ");
+  Serial.println(reservedCount);
+  Serial.print("Total Occupied Slots: ");
+  Serial.println(parkedCount);
+  Serial.print("Total Available Slots: ");
+  Serial.println(availableCount);
+  Serial.println();
+}
